@@ -1,0 +1,269 @@
+---
+title: "NN_MLP_Final_Project"
+author: "Claire Mahon"
+date: "2025-04-14"
+output: html_document
+---
+
+```{r}
+# Load libraries
+library(tidyverse)
+library(neuralnet)
+library(caret)
+library(scales)
+library(dplyr)
+```
+
+```{r}
+# Set a seed for recreation
+set.seed(42)
+```
+
+```{r}
+# Read the dataset
+rankings <- read.csv("/Users/clairemahon/DS4420/FinalProject/countrybranding.csv")
+head(rankings)
+```
+
+```{r}
+#Lets look at the most recent year, 2023 for our analysis
+rankings_2023 <- rankings %>% filter(Year == 2023)
+head(rankings_2023)
+```
+
+
+```{r}
+rankings <- as.data.frame(rankings_2023)
+str(rankings)
+```
+
+```{r}
+# Drop dummy region columns
+regions_to_remove <- c("Africa", "Asia", "northeu", "southeu", "middle.east", "northam", "middleam", "southam", "oceania")
+rankings_clean <- rankings %>% select(-all_of(regions_to_remove))
+```
+
+```{r}
+# Only want the attribute features ending with _R (Survey rating, not the 100p percent ranking attributes)
+rankings_clean <- rankings_clean %>%
+  select(Brand, ends_with("_R"))
+```
+
+```{r}
+# Drop columns with NAN values
+rankings_clean <- rankings_clean %>%
+  select(-c(`Open.travel.policies_R`, `Easy.to.get.around_R`, `Individualistic_R`))
+```
+
+```{r}
+# Number of countries
+cat("Countries #:", nrow(rankings_clean), "\n")
+```
+
+```{r}
+# Target = OVERALL_R
+# Remove Brand column to prepare data for the mlp
+
+data_mlp <- rankings_clean %>%
+  select(-Brand)
+
+# Normalize data w caret
+preProc <- preProcess(data_mlp, method = c("range"))
+data_scaled <- predict(preProc, data_mlp)
+
+```
+
+```{r}
+# Split data into test and train sets
+train_index <- createDataPartition(data_scaled$OVERALL_R, p = 0.8, list = FALSE)
+
+train_data <- data_scaled[train_index, ]
+test_data <- data_scaled[-train_index, ]
+
+```
+
+```{r}
+# Want to predict overall ranking from all of the other survey attributes
+features <- setdiff(names(train_data), "OVERALL_R")
+f <- as.formula(paste("OVERALL_R ~", paste(features, collapse = " + ")))
+
+# Train the model
+nn_model <- neuralnet(f, 
+                      data = train_data,
+                      hidden = c(128, 64),
+                      linear.output = TRUE,
+                      stepmax = 1e6)
+
+# Plot the network (somewhat noisy given so many neurons)
+#plot(nn_model)
+```
+
+
+```{r}
+# Predict on training and test datasets
+pred_train_raw <- predict(nn_model, train_data)
+pred_test_raw <- predict(nn_model, test_data)
+
+# Apply ReLU activation for output
+pred_train <- pmax(as.numeric(pred_train_raw), 0)
+pred_test <- pmax(as.numeric(pred_test_raw), 0)
+
+# Let's look at the actual values from the train and test sets for evaluation
+true_train <- train_data$OVERALL_R
+true_test <- test_data$OVERALL_R
+
+# Return MSE
+train_mse <- mean((true_train - pred_train)^2)
+test_mse <- mean((true_test - pred_test)^2)
+
+# Return R^2
+
+train_r2 <- cor(true_train, pred_train)^2
+test_r2 <- cor(true_test, pred_test)^2
+
+cat("Training MSE:", train_mse, "\n")
+cat("Training R^2:", train_r2, "\n")
+cat("Test MSE:", test_mse, "\n")
+cat("Test R^2:", test_r2, "\n")
+```
+```{r}
+# Rescale predictions to original scale (from 0 to 1 range to actual ranks)
+min_y <- min(data_nn$OVERALL_R)
+max_y <- max(data_nn$OVERALL_R)
+
+# Rescaling function
+rescale_to_real <- function(scaled, min_val, max_val) {
+  return(scaled * (max_val - min_val) + min_val)
+}
+
+# Rescale predictions
+pred_train_real <- rescale_to_real(pred_train, min_y, max_y)
+pred_test_real <- rescale_to_real(pred_test, min_y, max_y)
+
+# Rescale true y values
+actual_train_real <- rescale_to_real(true_train, min_y, max_y)
+actual_test_real <- rescale_to_real(true_test, min_y, max_y)
+
+```
+
+
+```{r}
+# Real-world metrics
+train_mae_real <- mean(abs(actual_train_real - pred_train_real))
+test_mae_real <- mean(abs(actual_test_real - pred_test_real))
+
+train_r2_real <- cor(actual_train_real, pred_train_real)^2
+test_r2_real <- cor(actual_test_real, pred_test_real)^2
+
+cat("Train MAE (real scale):", train_mae_real, "\n")
+cat("Train R^2 (real scale):", train_r2_real, "\n")
+
+cat("Test MAE (real scale):", test_mae_real, "\n")
+cat("Test R^2 (real scale):", test_r2_real, "\n")
+
+```
+
+```{r}
+# Want to show the plot with all of the countries included
+pred_all_raw <- predict(nn_model, data_scaled)
+pred_all <- pmax(as.numeric(pred_all_raw), 0)
+
+# Rescale data to real-world ranks
+pred_all_real <- rescale_to_real(pred_all, min_y, max_y)
+actual_all_real <- rescale_to_real(data_scaled$OVERALL_R, min_y, max_y)
+
+plot_df_all <- data.frame(
+  actual = actual_all_real,
+  predicted = pred_all_real,
+  country = trimws(rankings_clean$Brand)
+)
+
+# Make sure cases are correct across country names
+plot_df_all$country <- tools::toTitleCase(tolower(plot_df_all$country))
+
+# Highlight a few specific countries for our analysis
+highlighted_countries <- c("United States", "Bulgaria", "Singapore", "China")
+
+plot_df_all <- plot_df_all %>%
+  mutate(highlight = ifelse(country %in% highlighted_countries, country, "Other"))
+
+highlight_colors <- c(
+  "United States" = "red",
+  "Bulgaria" = "blue",
+  "Singapore" = "green",
+  "China" = "purple"
+)
+
+# Plot
+ggplot(plot_df_all, aes(x = actual, y = predicted)) +
+  geom_point(data = filter(plot_df_all, highlight == "Other"),
+             color = "lightgray", alpha = 0.6) +
+  geom_point(data = filter(plot_df_all, highlight != "Other"),
+             aes(color = highlight), size = 4) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  scale_color_manual(values = highlight_colors) +
+  scale_x_reverse() +
+  scale_y_reverse() +
+  labs(
+    x = "Actual Overall Country Rank",
+    y = "Predicted Overall Country Rank",
+    title = "Predicted vs Actual Country Rank (All Countries)",
+    color = "Country"
+  ) +
+  theme_minimal()
+
+```
+
+
+```{r}
+# Predicting Bulgaria's rank improvement with muted attributes (Affordability and Strong Military) as seen in the correlation as negative influence on a country's rank
+
+#Lowering the effects of poor attributes should increase the country rank
+
+bulgaria_row <- data_scaled[rankings_clean$Brand == "Bulgaria", ]
+negative_attributes <- c("Affordable_R", "Strong.military_R")
+
+# Mute those attributes in the scaled version
+bulgaria_row[negative_attributes] <- pmin(bulgaria_row[negative_attributes] * 0.8, 1)
+
+# Predict the improved rank
+bulgaria_pred_scaled <- pmax(predict(nn_model, bulgaria_row), 0)
+
+# Rescale to real rank
+bulgaria_pred_real <- rescale_to_real(bulgaria_pred_scaled, min_y, max_y)
+
+# Compare original vs improved prediction
+original_rank <- rescale_to_real(data_scaled[rankings_clean$Brand == "Bulgaria", "OVERALL_R"], min_y, max_y)
+
+cat("Original Predicted Rank:", original_rank, "\n")
+cat("Improved Predicted Rank:", bulgaria_pred_real, "\n")
+```
+
+
+
+```{r}
+#Predicting Singapores's rank rising if they improve their Quality of Life and cultural influence
+
+# Get Singapore
+singapore_row <- data_scaled[rankings_clean$Brand == "Singapore", ]
+
+# Attributes to improve by 20%
+important_attributes <- c("QUALITY.OF.LIFE_R", "CULTURAL.INFLUENCE_R")
+
+# Improve those attributes in the scaled version
+singapore_row[important_attributes] <- pmin(singapore_row[important_attributes] * 0.8, 1)
+
+# Predict the improved rank
+singapore_pred_scaled <- pmax(predict(nn_model, singapore_row), 0)
+
+# Rescale to real rank
+singapore_pred_real <- rescale_to_real(singapore_pred_scaled, min_y, max_y)
+
+# Compare original vs improved prediction
+original_rank <- rescale_to_real(data_scaled[rankings_clean$Brand == "Singapore", "OVERALL_R"], min_y, max_y)
+
+cat("Original Predicted Rank:", original_rank, "\n")
+cat("Improved Predicted Rank:", singapore_pred_real, "\n")
+
+
+```
