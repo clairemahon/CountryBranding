@@ -242,25 +242,25 @@ cat("Improved Predicted Rank:", bulgaria_pred_real, "\n")
 
 
 ```{r}
-#Predicting Singapores's rank rising if they improve their Quality of Life and cultural influence
+#Predicting Lebanon's rank rising if they improve their Quality of Life and cultural influence
 
-# Get Singapore
-singapore_row <- data_scaled[rankings_clean$Brand == "Singapore", ]
+# Get Lebanon
+lebanon_row <- data_scaled[rankings_clean$Brand == "Lebanon", ]
 
 # Attributes to improve by 20%
 important_attributes <- c("QUALITY.OF.LIFE_R", "CULTURAL.INFLUENCE_R")
 
 # Improve those attributes in the scaled version
-singapore_row[important_attributes] <- pmin(singapore_row[important_attributes] * 0.8, 1)
+lebanon_row[important_attributes] <- pmin(lebanon_row[important_attributes] * 1.2, 1)
 
 # Predict the improved rank
-singapore_pred_scaled <- pmax(predict(nn_model, singapore_row), 0)
+lebanon_pred_scaled <- pmax(predict(nn_model, lebanon_row), 0)
 
 # Rescale to real rank
-singapore_pred_real <- rescale_to_real(singapore_pred_scaled, min_y, max_y)
+lebanon_pred_real <- rescale_to_real(lebanon_pred_scaled, min_y, max_y)
 
 # Compare original vs improved prediction
-original_rank <- rescale_to_real(data_scaled[rankings_clean$Brand == "Singapore", "OVERALL_R"], min_y, max_y)
+original_rank <- rescale_to_real(data_scaled[rankings_clean$Brand == "Lebanon", "OVERALL_R"], min_y, max_y)
 
 cat("Original Predicted Rank:", original_rank, "\n")
 cat("Improved Predicted Rank:", singapore_pred_real, "\n")
